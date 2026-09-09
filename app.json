@@ -2,13 +2,13 @@
   "expo": {
     "name": "Campus Hub",
     "slug": "campus-hub",
-    "version": "0.1.0",
+    "version": "0.3.0",
     "orientation": "portrait",
     "scheme": "campushub",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.lakonyemma.campushub",
-      "versionCode": 1,
+      "versionCode": 3,
       "permissions": [
         "VIBRATE",
         "POST_NOTIFICATIONS"
