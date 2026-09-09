@@ -20,6 +20,11 @@ from sqlalchemy import create_engine, String, Integer, DateTime, Text, ForeignKe
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./campus_hub.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
@@ -64,7 +69,7 @@ class Note(Base):
 Base.metadata.create_all(engine)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-app = FastAPI(title="Campus Hub API", version="1.1.0")
+app = FastAPI(title="Campus Hub API", version="1.1.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 def db_session():
@@ -172,7 +177,7 @@ def health():
     return {
         "ok": True,
         "service": "campus-hub-api",
-        "version": "1.1.0",
+        "version": "1.1.1",
         "ai_provider": "gemini" if GEMINI_API_KEY else "fallback",
         "database": "postgres" if DATABASE_URL.startswith("postgres") else "sqlite",
     }
