@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Campus Hub",
+    "slug": "campus-hub",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "campushub",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.lakonyemma.campushub",
+      "versionCode": 1,
+      "permissions": [
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-notifications"
+    ],
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
