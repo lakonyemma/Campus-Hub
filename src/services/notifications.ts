@@ -13,7 +13,6 @@ Notifications.setNotificationHandler({
 export async function prepareNotifications() {
   const permissions = await Notifications.requestPermissionsAsync();
   if (permissions.status !== "granted") return false;
-
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("academic", {
       name: "Academic reminders",
@@ -23,4 +22,16 @@ export async function prepareNotifications() {
     });
   }
   return true;
+}
+
+export async function scheduleAcademicReminder(title: string, body: string, when: Date, data: Record<string, any> = {}) {
+  if (when.getTime() <= Date.now()) return null;
+  return Notifications.scheduleNotificationAsync({
+    content: { title, body, sound: "default", data },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: when, channelId: Platform.OS === "android" ? "academic" : undefined }
+  });
+}
+
+export async function cancelAcademicReminder(id: string) {
+  await Notifications.cancelScheduledNotificationAsync(id);
 }
