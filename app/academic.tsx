@@ -1,0 +1,25 @@
+import { useEffect, useState } from "react";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Screen } from "@/src/components/Screen";
+import { Card } from "@/src/components/Card";
+import { colors } from "@/src/theme";
+import { apiFetch } from "@/src/services/api";
+
+export default function AcademicScreen(){
+  const [attendance,setAttendance]=useState<any[]>([]); const [grades,setGrades]=useState<any>({gpa:null,courses:[]}); const [exams,setExams]=useState<any[]>([]);
+  const [course,setCourse]=useState(""); const [points,setPoints]=useState("4.0"); const [credits,setCredits]=useState("3"); const [examCourse,setExamCourse]=useState(""); const [examDate,setExamDate]=useState("");
+  async function load(){try{const [a,g,e]=await Promise.all([apiFetch("/attendance"),apiFetch("/grades"),apiFetch("/exams")]);setAttendance(a);setGrades(g);setExams(e)}catch{}}
+  useEffect(()=>{load()},[]);
+  async function saveGrade(){if(!course.trim())return;await apiFetch("/grades",{method:"POST",body:JSON.stringify({course:course.trim(),credits:Number(credits)||3,grade_point:Number(points)||0,semester:"Current"})});setCourse("");await load()}
+  async function saveExam(){if(!examCourse.trim()||!examDate.trim())return;const d=new Date(examDate);if(Number.isNaN(d.getTime()))return;await apiFetch("/exams",{method:"POST",body:JSON.stringify({course:examCourse.trim(),exam_at:d.toISOString()})});setExamCourse("");setExamDate("");await load()}
+  return <Screen>
+    <Text style={styles.title}>Academic records</Text><Text style={styles.subtitle}>GPA, attendance and exams in one place.</Text>
+    <Card style={styles.hero}><Text style={styles.label}>CURRENT GPA</Text><Text style={styles.gpa}>{grades.gpa??"—"}</Text><Text style={styles.meta}>{grades.courses?.length||0} graded course units</Text></Card>
+    <Text style={styles.section}>Grades</Text>{grades.courses?.map((g:any)=><Card key={g.id} style={styles.card}><View style={styles.row}><View style={{flex:1}}><Text style={styles.itemTitle}>{g.course}</Text><Text style={styles.meta}>{g.credits} credits · {g.semester}</Text></View><Text style={styles.point}>{g.grade_point}</Text></View></Card>)}
+    <Card><Text style={styles.cardTitle}>Add grade</Text><TextInput value={course} onChangeText={setCourse} placeholder="Course unit" placeholderTextColor={colors.muted} style={styles.input}/><View style={styles.row}><TextInput value={points} onChangeText={setPoints} keyboardType="decimal-pad" placeholder="Grade point" placeholderTextColor={colors.muted} style={[styles.input,{flex:1}]}/><TextInput value={credits} onChangeText={setCredits} keyboardType="decimal-pad" placeholder="Credits" placeholderTextColor={colors.muted} style={[styles.input,{flex:1}]}/></View><Pressable style={styles.button} onPress={saveGrade}><Text style={styles.buttonText}>Save grade</Text></Pressable></Card>
+    <Text style={styles.section}>Attendance</Text>{attendance.map((a:any)=><Card key={a.course} style={styles.card}><View style={styles.row}><View style={{flex:1}}><Text style={styles.itemTitle}>{a.course}</Text><Text style={styles.meta}>{a.attended}/{a.total} classes attended</Text></View><Text style={[styles.point,a.percentage<75&&{color:colors.warning}]}>{a.percentage}%</Text></View></Card>)}{!attendance.length&&<Card><Text style={styles.meta}>No attendance records yet.</Text></Card>}
+    <Text style={styles.section}>Exams</Text>{exams.map((e:any)=><Card key={e.id} style={styles.card}><Text style={styles.itemTitle}>{e.course}</Text><Text style={styles.meta}>{new Date(e.exam_at).toLocaleString()}{e.room?` · ${e.room}`:""}</Text></Card>)}
+    <Card><Text style={styles.cardTitle}>Add exam</Text><TextInput value={examCourse} onChangeText={setExamCourse} placeholder="Course unit" placeholderTextColor={colors.muted} style={styles.input}/><TextInput value={examDate} onChangeText={setExamDate} placeholder="2026-09-25 09:00" placeholderTextColor={colors.muted} style={styles.input}/><Pressable style={styles.button} onPress={saveExam}><Text style={styles.buttonText}>Save exam</Text></Pressable></Card>
+  </Screen>
+}
+const styles=StyleSheet.create({title:{color:colors.text,fontSize:28,fontWeight:"800"},subtitle:{color:colors.muted,marginTop:5,marginBottom:18},hero:{backgroundColor:colors.surface2},label:{color:colors.primary,fontWeight:"800",fontSize:11,letterSpacing:1.5},gpa:{color:colors.text,fontSize:42,fontWeight:"900",marginTop:8},meta:{color:colors.muted,marginTop:4},section:{color:colors.text,fontSize:18,fontWeight:"800",marginVertical:14},card:{marginBottom:10},row:{flexDirection:"row",gap:10,alignItems:"center"},itemTitle:{color:colors.text,fontSize:16,fontWeight:"800"},point:{color:colors.primary,fontSize:20,fontWeight:"900"},cardTitle:{color:colors.text,fontSize:17,fontWeight:"800",marginBottom:12},input:{backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,color:colors.text,borderRadius:12,padding:13,marginBottom:10},button:{backgroundColor:colors.primary,padding:14,borderRadius:13,alignItems:"center"},buttonText:{color:"#061426",fontWeight:"900"}});
