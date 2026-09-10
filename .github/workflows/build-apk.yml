@@ -15,7 +15,7 @@ on:
       - '.github/workflows/build-apk.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -51,10 +51,20 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK
+      - name: Prepare APK file
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Campus-Hub.apk
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: Campus-Hub-Android-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: Campus-Hub.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish APK as GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="campus-hub-${{ github.run_number }}"
+          gh release create "$TAG" Campus-Hub.apk --title "Campus Hub APK ${{ github.run_number }}" --notes "Latest installable Android APK for Campus Hub." --latest
