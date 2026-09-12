@@ -165,6 +165,12 @@ class EmailVerification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ProfilePhoto(Base):
+    __tablename__ = "campus_profile_photos"
+    user_id: Mapped[int] = mapped_column(ForeignKey("campus_users.id"), primary_key=True)
+    data: Mapped[str] = mapped_column(Text)
+
+
 Base.metadata.create_all(engine)
 def hash_password(password: str) -> str:
     raw = password.encode("utf-8")
@@ -515,6 +521,48 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
 @app.get("/me")
 def me(user: User = Depends(current_user)):
     return profile_dict(user)
+
+
+@app.get("/me/photo")
+def get_profile_photo(user: User = Depends(current_user), db: Session = Depends(db_session)):
+    photo = db.get(ProfilePhoto, user.id)
+    return {"photo": photo.data if photo else None}
+
+
+@app.post("/me/photo")
+async def upload_profile_photo(file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(db_session)):
+    raw = await file.read(512 * 1024 + 1)
+    if len(raw) > 512 * 1024:
+        raise HTTPException(413, "Photo is too large. Choose a smaller image.")
+    kind = "jpeg" if raw.startswith(b"\xff\xd8\xff") else "png" if raw.startswith(b"\x89PNG\r\n\x1a\n") else None
+    if not kind:
+        raise HTTPException(422, "Choose a JPEG or PNG photo.")
+    try:
+        with fitz.open(stream=raw, filetype=kind) as document:
+            page = document[0]
+            if page.rect.width > 2048 or page.rect.height > 2048:
+                raise ValueError("Image dimensions exceed the limit")
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(min(1, 384 / max(page.rect.width, page.rect.height)), min(1, 384 / max(page.rect.width, page.rect.height))), colorspace=fitz.csRGB, alpha=False)
+            clean = pixmap.tobytes("jpeg")
+    except Exception:
+        raise HTTPException(422, "This image could not be read. Choose another photo.")
+    value = "data:image/jpeg;base64," + base64.b64encode(clean).decode("ascii")
+    photo = db.get(ProfilePhoto, user.id)
+    if photo:
+        photo.data = value
+    else:
+        db.add(ProfilePhoto(user_id=user.id, data=value))
+    db.commit()
+    return {"photo": value}
+
+
+@app.delete("/me/photo")
+def remove_profile_photo(user: User = Depends(current_user), db: Session = Depends(db_session)):
+    photo = db.get(ProfilePhoto, user.id)
+    if photo:
+        db.delete(photo)
+        db.commit()
+    return {"photo": None}
 
 
 @app.patch("/me")
