@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
+import secrets
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from email.utils import parseaddr
 
 import fitz
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer\nfrom fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field
@@ -30,6 +35,9 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+EMAIL_FROM = os.getenv("EMAIL_FROM", "Campus Hub <lakonyemmanuel92@gmail.com>")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://campus-hub-install.lakonyemmanuel92.chatgpt.site").rstrip("/")
 GEMINI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
@@ -147,6 +155,16 @@ class AIMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class EmailVerification(Base):
+    __tablename__ = "campus_email_verifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("campus_users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 Base.metadata.create_all(engine)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -252,6 +270,60 @@ def scanned_pdf_text(doc: fitz.Document) -> str:
         return ""
 
 
+def verification_token(db: Session, user_id: int) -> str:
+    raw_token = secrets.token_urlsafe(32)
+    db.add(EmailVerification(
+        user_id=user_id,
+        token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    ))
+    return raw_token
+
+
+def send_verification_email(recipient: str, name: str, token: str) -> None:
+    if not BREVO_API_KEY:
+        raise RuntimeError("Email delivery is not configured")
+    sender_name, sender_email = parseaddr(EMAIL_FROM)
+    if not sender_email:
+        raise RuntimeError("The Campus Hub sender email is not configured")
+    verify_url = f"https://campus-hub-api-sboa.onrender.com/auth/verify?token={urllib.parse.quote(token)}"
+    payload = {
+        "sender": {"name": sender_name or "Campus Hub", "email": sender_email},
+        "to": [{"email": recipient, "name": name or "Student"}],
+        "subject": "Verify your Campus Hub account",
+        "htmlContent": (
+            "<div style=\"font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#10203d\">"
+            "<h2>Welcome to Campus Hub</h2>"
+            "<p>Confirm your email address to finish creating your account.</p>"
+            f"<p><a href=\"{verify_url}\" style=\"display:inline-block;background:#173b74;color:white;"
+            "padding:12px 20px;border-radius:8px;text-decoration:none\">Verify my email</a></p>"
+            "<p>This link expires in 24 hours. If you did not create this account, ignore this email.</p>"
+            "</div>"
+        ),
+    }
+    request = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status not in (200, 201, 202):
+                raise RuntimeError("The verification email could not be sent")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        print(f"[campus-hub] Brevo error {exc.code}: {detail[:500]}")
+        raise RuntimeError("The verification email could not be sent") from exc
+    except Exception as exc:
+        print(f"[campus-hub] Brevo request failed: {exc}")
+        raise RuntimeError("The verification email could not be sent") from exc
+
+
 def profile_dict(user: User):
     return {
         "id": user.id,
@@ -282,6 +354,10 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+
+
+class ResendVerificationIn(BaseModel):
+    email: EmailStr
 
 
 class ProfileIn(BaseModel):
