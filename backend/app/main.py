@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -166,7 +166,22 @@ class EmailVerification(Base):
 
 
 Base.metadata.create_all(engine)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_password(password: str) -> str:
+    raw = password.encode("utf-8")
+    if len(raw) > 72:
+        raise HTTPException(422, "Password must be at most 72 UTF-8 bytes.")
+    return bcrypt.hashpw(raw, bcrypt.gensalt(rounds=12)).decode("ascii")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    raw = password.encode("utf-8")
+    if len(raw) > 72:
+        return False
+    try:
+        return bcrypt.checkpw(raw, password_hash.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 app = FastAPI(title="Campus Hub API", version="1.3.0")
 app.add_middleware(
@@ -439,7 +454,7 @@ def health():
 def register(data: RegisterIn, db: Session = Depends(db_session)):
     if db.query(User).filter(User.email == data.email.lower()).first():
         raise HTTPException(409, "Email already registered")
-    user = User(name=data.name.strip() or "Student", email=data.email.lower(), password_hash=pwd_context.hash(data.password), university="ISBAT University")
+    user = User(name=data.name.strip() or "Student", email=data.email.lower(), password_hash=hash_password(data.password), university="ISBAT University")
     db.add(user)
     db.flush()
     raw_token = verification_token(db, user.id)
@@ -487,7 +502,7 @@ def resend_verification(data: ResendVerificationIn, db: Session = Depends(db_ses
 @app.post("/auth/login")
 def login(data: LoginIn, db: Session = Depends(db_session)):
     user = db.query(User).filter(User.email == data.email.lower()).first()
-    if not user or not pwd_context.verify(data.password, user.password_hash):
+    if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(401, "Incorrect email or password")
     pending = db.query(EmailVerification).filter(EmailVerification.user_id == user.id, EmailVerification.used_at.is_(None)).first()
     if pending:
