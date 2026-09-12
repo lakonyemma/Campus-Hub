@@ -13,7 +13,7 @@ from typing import Optional
 import fitz
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer\nfrom fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field
@@ -364,8 +364,48 @@ def register(data: RegisterIn, db: Session = Depends(db_session)):
     if db.query(User).filter(User.email == data.email.lower()).first():
         raise HTTPException(409, "Email already registered")
     user = User(name=data.name.strip() or "Student", email=data.email.lower(), password_hash=pwd_context.hash(data.password), university="ISBAT University")
-    db.add(user); db.commit(); db.refresh(user)
-    return {"token": token_for(user.id), "user": profile_dict(user)}
+    db.add(user)
+    db.flush()
+    raw_token = verification_token(db, user.id)
+    db.commit()
+    try:
+        send_verification_email(user.email, user.name, raw_token)
+    except RuntimeError as exc:
+        db.query(EmailVerification).filter(EmailVerification.user_id == user.id).delete()
+        db.delete(user)
+        db.commit()
+        raise HTTPException(503, str(exc))
+    return {"verification_required": True, "message": "Check your email to verify your account."}
+
+
+@app.get("/auth/verify")
+def verify_email(token: str, db: Session = Depends(db_session)):
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    row = db.query(EmailVerification).filter(EmailVerification.token_hash == token_hash).first()
+    if not row or row.used_at is not None or row.expires_at < datetime.utcnow():
+        return RedirectResponse(f"{FRONTEND_URL}/?verification=invalid", status_code=303)
+    row.used_at = datetime.utcnow()
+    db.commit()
+    return RedirectResponse(f"{FRONTEND_URL}/?verified=1", status_code=303)
+
+
+@app.post("/auth/resend-verification")
+def resend_verification(data: ResendVerificationIn, db: Session = Depends(db_session)):
+    user = db.query(User).filter(User.email == data.email.lower()).first()
+    if not user:
+        return {"ok": True}
+    pending = db.query(EmailVerification).filter(EmailVerification.user_id == user.id, EmailVerification.used_at.is_(None)).all()
+    if not pending:
+        return {"ok": True}
+    for row in pending:
+        row.used_at = datetime.utcnow()
+    raw_token = verification_token(db, user.id)
+    db.commit()
+    try:
+        send_verification_email(user.email, user.name, raw_token)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    return {"ok": True}
 
 
 @app.post("/auth/login")
@@ -373,6 +413,9 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
     user = db.query(User).filter(User.email == data.email.lower()).first()
     if not user or not pwd_context.verify(data.password, user.password_hash):
         raise HTTPException(401, "Incorrect email or password")
+    pending = db.query(EmailVerification).filter(EmailVerification.user_id == user.id, EmailVerification.used_at.is_(None)).first()
+    if pending:
+        raise HTTPException(403, "Verify your email before signing in.")
     if not user.university:
         user.university = "ISBAT University"; db.commit()
     return {"token": token_for(user.id), "user": profile_dict(user)}
